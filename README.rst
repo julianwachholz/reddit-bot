@@ -1,7 +1,7 @@
 Reddit Bot
 ==========
 
-Todo README.
+A Python base for an easy to use and implement Reddit bot.
 
 
 License

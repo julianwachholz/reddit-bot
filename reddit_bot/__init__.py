@@ -238,27 +238,83 @@ class RedditBot(_RedditBotBase):
         self._set_blocked_users()
 
 
-class RedditReplyBot(RedditBot):
+class _RedditReplyBotMixin(object):
     """
-    A bot capable of replying to comments.
+    Keep track of how often we post in a subreddit.
 
     """
     @classmethod
     def get_scope(cls):
-        return super(RedditReplyBot, cls).get_scope() | {
+        return super(_RedditReplyBotMixin, cls).get_scope() | {
             'read',
             'submit',
             'edit',
         }
 
     def bot_start(self):
-        super(RedditReplyBot, self).bot_start()
+        super(_RedditReplyBotMixin, self).bot_start()
+        self.subreddit_timeouts = {}
+
+    def _check_things(self, thing_type, subreddit, before=None):
+        """
+        Fetch latest things in a subreddit.
+
+        :param 'comments'|'submissions' thing_type: what things to fetch
+        :param str subreddit: name of the subreddit to check
+        :param str|None before: latest thing id
+
+        """
+        logger.debug('_check_things(subreddit={!r}, before={!r})'.format(
+            subreddit, before))
+
+        params = {'sort': 'old', 'before': before}
+        latest_created = 0
+        latest_fullname = before
+
+        if thing_type == 'submissions':
+            things = self.r.get_subreddit(subreddit).get_new(
+                limit=self.settings['fetch_limit'],
+                params=params
+            )
+        elif thing_type == 'comments':
+            things = self.r.get_comments(
+                subreddit,
+                limit=self.settings['fetch_limit'],
+                params=params
+            )
+
+        for thing in things:
+            if thing.created_utc > latest_created:
+                latest_created = thing.created_utc
+                latest_fullname = thing.fullname
+            yield 'thing', thing
+        # remember newest comment so we dont fetch it again
+        yield 'end', latest_fullname
+
+    def can_post_in_subreddit(self, subreddit):
+        """Check if we should post again in this subreddit."""
+        if subreddit not in self.subreddit_timeouts \
+           or self.subreddit_timeouts[subreddit] < datetime.now():
+            return True
+        return False
+
+    def did_post_in_subreddit(self, subreddit):
+        now = datetime.now()
+        delta = timedelta(seconds=self.settings['subreddit_timeout'])
+        self.subreddit_timeouts[subreddit] = now + delta
+
+
+class RedditCommentBot(_RedditReplyBotMixin, RedditBot):
+    """
+    A bot capable of replying to comments.
+
+    """
+    def bot_start(self):
+        super(RedditCommentBot, self).bot_start()
 
         # TODO occasionally check size of this (with sys.getsizeof?) and clear
-        self.submissions_counter = Counter()
-        self.subreddit_timeouts = {}
+        self.submissions_comment_counter = Counter()
         self.subreddit_fullnames = {}
-
         self.comment_checks = self.get_comment_checks()
 
         if self.settings['check_parent_comments']:
@@ -286,7 +342,7 @@ class RedditReplyBot(RedditBot):
                                   self.__class__.__name__))
 
     def loop(self, subreddit):
-        super(RedditReplyBot, self).loop(subreddit)
+        super(RedditCommentBot, self).loop(subreddit)
 
         if not self.can_post_in_subreddit(subreddit):
             return
@@ -295,46 +351,20 @@ class RedditReplyBot(RedditBot):
 
     def check_comments(self, subreddit, before=None):
         """Fetch latest comments in a subreddit."""
-        logger.debug('check_comments(subreddit={!r}, before={!r})'.format(
-            subreddit, before))
+        for control, thing in self._check_things('comments', subreddit, before):
+            if control == 'end':
+                self.subreddit_fullnames[subreddit] = thing
+                break
 
-        params = {'sort': 'old', 'before': before}
-        latest_created = 0
-        latest_fullname = before
-
-        comments = self.r.get_comments(
-            subreddit,
-            limit=self.settings['fetch_limit'],
-            params=params
-        )
-
-        for comment in comments:
-            if comment.created_utc > latest_created:
-                latest_created = comment.created_utc
-                latest_fullname = comment.fullname
+            comment = thing
 
             if self.is_valid_comment(comment):
                 did_reply = self.reply_comment(comment)
                 if did_reply:
                     logger.info('replied to comment {}'.format(comment.id))
-                    self.submissions_counter[comment.link_id] += 1
+                    self.submissions_comment_counter[comment.link_id] += 1
                     self.did_post_in_subreddit(subreddit)
                     break
-
-        # remember newest comment so we dont fetch it again
-        self.subreddit_fullnames[subreddit] = latest_fullname
-
-    def can_post_in_subreddit(self, subreddit):
-        """Check if we should post again in this subreddit."""
-        if subreddit not in self.subreddit_timeouts \
-           or self.subreddit_timeouts[subreddit] < datetime.now():
-            return True
-        return False
-
-    def did_post_in_subreddit(self, subreddit):
-        now = datetime.now()
-        delta = timedelta(seconds=self.settings['subreddit_timeout'])
-        self.subreddit_timeouts[subreddit] = now + delta
 
     def is_valid_comment(self, comment):
         """Check if the comment is eligible for a reply."""
@@ -351,7 +381,7 @@ class RedditReplyBot(RedditBot):
     def comment_submission_cap_not_reached(self, comment):
         max_replies = self.settings['max_replies_per_post']
 
-        return self.submissions_counter[comment.link_id] < max_replies
+        return self.submissions_comment_counter[comment.link_id] < max_replies
 
     def comment_author_blacklisted(self, comment):
         if not comment.author:
@@ -379,6 +409,57 @@ class RedditReplyBot(RedditBot):
 
     def _comment_parent(self, comment):
         return self.r.get_info(thing_id=comment.parent_id)
+
+
+class RedditSubmissionBot(_RedditReplyBotMixin, RedditBot):
+    """
+    A bot capable of replying to submissions.
+
+    """
+    def bot_start(self):
+        super(RedditSubmissionBot, self).bot_start()
+
+        self.subreddit_submissions = {}
+
+    def is_valid_submission(self, submission):
+        """Overwrite with your checks."""
+        return True
+
+    def reply_submission(self, submission):
+        """
+        Implement the `reply_submission` method to post a top level
+        comment to subreddit posts.
+
+        You should return True if a reply was made.
+
+        """
+        raise NotImplementedError('Implement {}.reply_submission(submission)'.format(
+                                  self.__class__.__name__))
+
+    def loop(self, subreddit):
+        super(RedditSubmissionBot, self).loop(subreddit)
+
+        if not self.can_post_in_subreddit(subreddit):
+            return
+
+        latest = self.subreddit_submissions.get(subreddit, None)
+        self.check_submissions(subreddit, before=latest)
+
+    def check_submissions(self, subreddit, before=None):
+        """Fetch latest submissions in a subreddit."""
+        for control, thing in self._check_things('comments', subreddit, before):
+            if control == 'end':
+                self.subreddit_submissions[subreddit] = thing
+                break
+
+            submission = thing
+
+            if self.is_valid_submission(submission):
+                did_reply = self.reply_submission(submission)
+                if did_reply:
+                    logger.info('replied to submission: {}'.format(submission.id))
+                    self.did_post_in_subreddit(subreddit)
+                    break
 
 
 class RedditMessageBot(RedditBot):
