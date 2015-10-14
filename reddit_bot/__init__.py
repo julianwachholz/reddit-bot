@@ -447,7 +447,7 @@ class RedditSubmissionBot(_RedditReplyBotMixin, RedditBot):
 
     def check_submissions(self, subreddit, before=None):
         """Fetch latest submissions in a subreddit."""
-        for control, thing in self._check_things('comments', subreddit, before):
+        for control, thing in self._check_things('submissions', subreddit, before):
             if control == 'end':
                 self.subreddit_submissions[subreddit] = thing
                 break
@@ -515,13 +515,13 @@ class RedditMessageBot(RedditBot):
                 self.on_user_message(message.author.name, message)
 
     def on_subreddit_message(self, subreddit, message):
-        raise NotImplementedError('Implement {}.on_subreddit_message(message)'.format(self.__class__.__name__))
+        logger.warn('{}.on_subreddit_message is not implemented.'.format(self.__class__.__name__))
 
     def on_admin_message(self, message):
-        logger.warn('on_admin_message not implemented')
+        logger.warn('{}.on_admin_message is not implemented.'.format(self.__class__.__name__))
 
     def on_user_message(self, user, message):
-        raise NotImplementedError('Implement {}.on_user_message(message)'.format(self.__class__.__name__))
+        logger.warn('{}.on_user_message is not implemented'.format(self.__class__.__name__))
 
     def after_mail_check(self):
         pass
