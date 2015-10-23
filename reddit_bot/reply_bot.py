@@ -135,6 +135,7 @@ class RedditCommentBot(_RedditReplyBotMixin, RedditBot):
                     logger.info('replied to comment {}'.format(comment.id))
                     self.submissions_comment_counter[comment.link_id] += 1
                     self.did_post_in_subreddit(subreddit)
+                    self.subreddit_fullnames[subreddit] = comment.fullname
                     break
 
     def is_valid_comment(self, comment):
@@ -230,5 +231,6 @@ class RedditSubmissionBot(_RedditReplyBotMixin, RedditBot):
                 if did_reply:
                     logger.info('replied to submission: {}'.format(submission.id))
                     self.did_post_in_subreddit(subreddit)
+                    self.subreddit_submissions[subreddit] = submission.fullname
                     break
 
