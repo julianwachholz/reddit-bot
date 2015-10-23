@@ -1,15 +1,12 @@
 {
     "bot_class": "{PACKAGE.CLASS}",
     "loglevel": "INFO",
-    "admin_name": "{ADMIN_NAME}",
-    "bot_name": "{BOT_NAME}",
+    "admins": "{ADMIN_NAMES}",
     "oauth_info": {
         "client_id": "{OAUTH_CLIENT_ID}",
         "client_secret": "{OAUTH_CLIENT_SECRET}",
         "redirect_uri": "http://127.0.0.1:65010/authorize_callback"
     },
-    "subreddit_list": "{whitelist.txt}",
-    "blocked_users": "{blacklist.txt}",
     "settings": {
         "loop_sleep": 2,
         "check_mail": 60,

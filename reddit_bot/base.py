@@ -1,6 +1,3 @@
-# -*- encoding: utf-8 -*-
-from __future__ import unicode_literals
-
 import sys
 import logging
 import time
@@ -83,16 +80,19 @@ class RedditBot(_RedditBotBase):
         self._setup(config)
         self._login(config)
 
+        self.subreddits = self._get_subreddits()
+        self.blocked_users = self._get_blocked_users()
+
     def _setup(self, config):
         try:
-            self.bot_name = config['bot_name']
-            self.admin_name = config['admin_name']
+            admins = config['admins']
+            if isinstance(admins, list):
+                self.admins = admins
+            else:
+                self.admins = list(map(str.strip, admins.split(',')))
 
             self.settings = DEFAULT_SETTINGS.copy()
             self.settings.update(config.get('settings', {}))
-
-            self.subreddits = self._get_subreddits(config['subreddit_list'])
-            self.blocked_users = self._get_blocked_users(config['blocked_users'])
         except KeyError as e:
             import sys
             sys.stderr.write('error: missing {} in configuration'.format(e))
@@ -104,12 +104,7 @@ class RedditBot(_RedditBotBase):
         for attr in ['client_id', 'client_secret', 'redirect_uri']:
             assert attr in config['oauth_info'], 'Missing `{}` in oauth_info'.format(attr)
 
-        user_agent = self.USER_AGENT.format(
-            name=self.bot_name,
-            admin=self.admin_name,
-            version='.'.join(map(str, self.VERSION))
-        )
-        self.r = Reddit(user_agent)
+        self.r = Reddit('OAuth Login v1.0')
         self.r.set_oauth_app_info(**config['oauth_info'])
 
         for attr in ['access_token', 'refresh_token']:
@@ -117,14 +112,24 @@ class RedditBot(_RedditBotBase):
         access_info = config['access_info']
         access_info['scope'] = self.__class__.get_scope()
         self.r.set_access_credentials(**access_info)
-
-        logger.info('Logged in as {}'.format(self.r.user.name))
+        self.bot_name = self.r.user.name
+        self.admins.append(self.bot_name)
+        user_agent = self.USER_AGENT.format(
+            name=self.bot_name,
+            admin=self.admins[0],
+            version='.'.join(map(str, self.VERSION))
+        )
+        logger.debug('User-Agent: {!r}'.format(user_agent))
+        self.r.http.headers['User-Agent'] = user_agent
+        logger.info('Logged in as {}'.format(self.bot_name))
 
     @classmethod
     def get_scope(cls):
         """Basic permission scope for RedditReplyBot operations."""
         return super(RedditBot, cls).get_scope() | {
             'identity',
+            'subscribe',
+            'mysubreddits',
         }
 
     def run_forever(self):
@@ -154,10 +159,10 @@ class RedditBot(_RedditBotBase):
                 self.remove_subreddits(subreddit)
                 break
             except RateLimitExceeded as e:
-                logger.warn('RateLimitExceeded! Sleeping {} seconds.'.format(e.sleep_time))
+                logger.warning('RateLimitExceeded! Sleeping {} seconds.'.format(e.sleep_time))
                 time.sleep(e.sleep_time)
             except (ConnectionError, HTTPException) as e:
-                logger.warn('Error: Reddit down or no connection? {!r}'.format(e))
+                logger.warning('Error: Reddit down or no connection? {!r}'.format(e))
                 time.sleep(self.settings['loop_sleep'] * 10)
             else:
                 time.sleep(self.settings['loop_sleep'])
@@ -165,43 +170,19 @@ class RedditBot(_RedditBotBase):
             logger.error("No subreddits in file. Will read file again in 5 seconds.")
             time.sleep(5)
 
-    def _get_file_lines(self, filename):
-        with open(filename) as f:
-            file_lines = set(map(str.strip, f.readlines()))
-        return file_lines
-
-    def _set_file_lines(self, filename, lines):
-        with open(filename, 'w') as f:
-            f.write('\n'.join(lines))
-
-    def _get_subreddits(self, filename=None):
-        if isinstance(filename, list):
-            return filename
-
-        if filename is not None:
-            self.subreddits_file = filename
-        subreddits = self._get_file_lines(self.subreddits_file)
-
+    def _get_subreddits(self):
+        subreddits = list(map(lambda s: s.display_name, self.r.get_my_subreddits()))
         logger.info('Subreddits: {} entries'.format(len(subreddits)))
+        logger.debug('List: {!r}'.format(subreddits))
         return subreddits
 
-    def _set_subreddits(self):
-        if self.subreddits_file is None:
-            raise RuntimeError('no subreddits file defined')
-        self._set_file_lines(self.subreddits_file, self.subreddits)
-
     def _get_blocked_users(self, filename=None):
-        if filename is not None:
-            self.blocked_users_file = filename
-        blocked_users = self._get_file_lines(self.blocked_users_file)
-
+        """Friends are blocked users, because Reddit only allows blocking
+        users by private messages."""
+        blocked_users = list(map(lambda u: u.name, self.r.get_friends()))
         logger.info('Blocked users: {} entries'.format(len(blocked_users)))
+        logger.debug('List: {!r}'.format(blocked_users))
         return blocked_users
-
-    def _set_blocked_users(self):
-        if self.blocked_users_file is None:
-            raise RuntimeError('no blocked_users file defined')
-        self._set_file_lines(self.blocked_users_file, self.blocked_users)
 
     def is_user_blocked(self, user_name):
         if user_name == self.bot_name:
@@ -212,25 +193,33 @@ class RedditBot(_RedditBotBase):
         return subreddit in self.subreddits
 
     def remove_subreddits(self, *subreddits):
-        for subreddit in subreddits:
-            if subreddit in self.subreddits:
-                self.subreddits.remove(subreddit)
-        self._set_subreddits()
+        for sub_name in subreddits:
+            if sub_name in self.subreddits:
+                self.subreddits.remove(sub_name)
+                sub = self.r.get_subreddit(sub_name)
+                sub.unsubscribe()
+                logger.info('Unsubscribed from /r/{}'.format(sub_name))
 
     def add_subreddits(self, *subreddits):
-        for subreddit in subreddits:
-            if subreddit not in self.subreddits:
-                self.subreddits.add(subreddit)
-        self._set_subreddits()
+        for sub_name in subreddits:
+            if sub_name not in self.subreddits:
+                self.subreddits.add(sub_name)
+                sub = self.r.get_subreddit(sub_name)
+                sub.subscribe()
+                logger.info('Subscribed to /r/{}'.format(sub_name))
 
     def block_users(self, *users):
-        for user in users:
-            if user not in self.blocked_users:
-                self.blocked_users.add(user)
-        self._set_blocked_users()
+        for user_name in users:
+            if user_name not in self.blocked_users:
+                self.blocked_users.add(user_name)
+                user = self.r.get_redditor(user_name)
+                user.friend()
+                logger.info('Blocked /u/{}'.format(user_name))
 
     def unblock_users(self, *users):
-        for user in users:
-            if user in self.blocked_users:
-                self.blocked_users.remove(user)
-        self._set_blocked_users()
+        for user_name in users:
+            if user_name in self.blocked_users:
+                self.blocked_users.remove(user_name)
+                user = self.r.get_redditor(user_name)
+                user.unfriend()
+                logger.info('Unblocked /u/{}'.format(user_name))

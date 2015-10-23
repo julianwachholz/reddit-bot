@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name='reddit_bot',
-    version='0.1.3',
+    version='0.2.0',
     url='https://github.com/reddit-bots/reddit-bot',
     license='GPLv3',
     author='Julian Wachholz',
@@ -30,7 +30,6 @@ setup(
         'Topic :: Software Development :: Libraries :: Python Modules',
         'Topic :: Utilities',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',

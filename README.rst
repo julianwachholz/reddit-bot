@@ -3,6 +3,7 @@ Reddit Bot
 
 A Python base for an easy to use and implement Reddit bot.
 
+Python 3 required.
 
 License
 -------

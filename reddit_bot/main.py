@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
-from __future__ import unicode_literals, print_function
 
 import logging
 import json
@@ -31,6 +29,8 @@ def get_bot_class(import_path):
         print('Could not import module "{}"!'.format(module_name))
     except AttributeError:
         print('Could not find class "{}" in "{}"!'.format(klass, module_name))
+    except:
+        raise
     return None
 
 
@@ -40,7 +40,7 @@ def _ask_config(config, in_settings=False):
             _ask_config(default, in_settings=True)
         elif key == 'bot_class':
             while True:
-                value = raw_input("Import path for bot class: ")
+                value = input("Import path for bot class: ")
                 if get_bot_class(value) is not None:
                     break
             config[key] = value
@@ -54,7 +54,7 @@ def _ask_config(config, in_settings=False):
 
             if isinstance(default, type('str')) and default.isupper():
                 while True:
-                    value = raw_input("{}: ".format(key))
+                    value = input("{}: ".format(key))
                     if value:
                         config[key] = value or default
                         break
@@ -63,7 +63,7 @@ def _ask_config(config, in_settings=False):
             else:
                 while True:
                     try:
-                        value = raw_input("{} ({}): ".format(key, default))
+                        value = input("{} ({}): ".format(key, default))
                         if value:
                             value = val_type(value)
                         elif in_settings:
@@ -97,7 +97,7 @@ def make_config(filename):
 
     url = r.get_authorize_url('uniqueKey', bot_class.get_scope(), True)
     print('Go to this url: =====\n\n{}\n\n====='.format(url))
-    code = raw_input('and enter the authorization code: ')
+    code = input('and enter the authorization code: ')
     assert code, "No authorization code supplied."
     access_info = r.get_access_information(code)
     access_info.pop('scope', None)
@@ -119,14 +119,6 @@ def main(config_file):
         config = make_config(sys.argv[1])
 
     logging.basicConfig(level=config.get('loglevel', 'WARN'), format=LOG_FORMAT)
-
-    if not os.path.exists(config['subreddit_list']):
-        open(config['subreddit_list'], 'a').close()
-        logger.info("Created empty {}".format(config['subreddit_list']))
-
-    if not os.path.exists(config['blocked_users']):
-        open(config['blocked_users'], 'a').close()
-        logger.info("Created empty {}".format(config['blocked_users']))
 
     bot_class = get_bot_class(config['bot_class'])
     bot = bot_class(config)
