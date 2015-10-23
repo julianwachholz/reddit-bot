@@ -55,7 +55,7 @@ class RedditMessageBot(RedditBot):
         if message.author is None and message.subreddit:
             self.on_subreddit_message(message.subreddit.display_name, message)
         elif message.author is not None:
-            if message.author.name == self.admin_name:
+            if message.author.name in self.admins:
                 self.on_admin_message(message)
             else:
                 self.on_user_message(message.author.name, message)
